@@ -1,0 +1,15 @@
+{
+  "name": "user-auth-service",
+  "version": "1.0.0",
+  "description": "User authentication and authorization module",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test test/**/*.test.js",
+    "dashboard": "node src/dms/dms-server.js",
+    "start": "node src/dms/dms-server.js"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}
