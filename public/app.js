@@ -205,6 +205,17 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+function getAssetUrl(filename) {
+  if (typeof window === 'undefined' || !window.location) return filename;
+  if (window.location.protocol === 'file:') return filename;
+  let path = window.location.pathname || '';
+  if (!path.endsWith('/') && !path.includes('.')) {
+    path = path + '/';
+  }
+  const dir = path.substring(0, path.lastIndexOf('/') + 1);
+  return `${window.location.origin}${dir}${filename}`;
+}
+
 /* ==================================================== */
 /* UNIFIED DUAL-MODE DATA LAYER (NODE SERVER / GH-PAGES)*/
 /* ==================================================== */
@@ -234,13 +245,21 @@ const dmsApi = {
     this.isStaticMode = true;
     console.log('[DMS Dashboard] Initializing Client-Side In-Memory Engine (GitHub Pages mode)...');
     try {
-      const res = await fetch('dms-data.json');
-      if (!res.ok) throw new Error('Could not load dms-data.json');
+      const url = getAssetUrl('dms-data.json');
+      console.log(`[DMS Dashboard] Fetching dataset from: ${url}`);
+      let res = await fetch(url);
+      if (!res.ok) {
+        console.warn(`[DMS Dashboard] Primary fetch failed (${res.status}), trying relative fetch...`);
+        res = await fetch('dms-data.json');
+      }
+      if (!res.ok) throw new Error(`Could not load dms-data.json (HTTP ${res.status})`);
       const records = await res.json();
       const RepoClass = window.DmsClientRepository || globalThis.DmsClientRepository;
       if (RepoClass) {
         this.clientRepo = new RepoClass(records);
         console.log(`[DMS Dashboard] Client Engine loaded ${records.length} records in memory!`);
+      } else {
+        throw new Error('DmsClientRepository is not defined on window/globalThis');
       }
     } catch (err) {
       console.error('[DMS Dashboard] Failed to load static dataset:', err);
@@ -695,6 +714,11 @@ async function initThailandMap() {
   if (state.map.leafletInstance) return;
 
   try {
+    if (typeof L === 'undefined') {
+      console.warn('[DMS Dashboard] Leaflet is not available, skipping map initialization.');
+      return;
+    }
+
     const map = L.map('thailandMap', {
       center: [13.736717, 100.523186],
       zoom: 6,
@@ -711,7 +735,10 @@ async function initThailandMap() {
       subdomains: 'abcd',
     }).addTo(map);
 
-    const res = await fetch('thailand-provinces.geojson');
+    let res = await fetch(getAssetUrl('thailand-provinces.geojson'));
+    if (!res.ok) {
+      res = await fetch('thailand-provinces.geojson');
+    }
     if (!res.ok) throw new Error('Failed to load GeoJSON');
     const geoData = await res.json();
     state.map.geoData = geoData;
@@ -897,8 +924,15 @@ function clearProvinceSelection() {
 async function loadCharts() {
   try {
     const chartsData = await dmsApi.getCharts(state.filters);
+    if (!chartsData) return;
 
     state.trendData = chartsData.registrationTrend;
+
+    if (typeof Chart === 'undefined') {
+      console.warn('[DMS Dashboard] Chart.js is not loaded yet, charts cannot be rendered.');
+      return;
+    }
+
     renderTrendChart(chartsData.registrationTrend);
     renderRegionsChart(chartsData.regions);
     renderStatusChart(chartsData.status);
@@ -1671,13 +1705,7 @@ async function loadPositionsTable() {
     `;
 
     const p = state.pagination.positions;
-    const result = await dmsApi.getPositionAggregations ? await dmsApi.getPositions({
-      page: p.page,
-      limit: p.limit,
-      sort: p.sort,
-      order: p.order,
-      filters: state.filters,
-    }) : await dmsApi.getPositions({
+    const result = await dmsApi.getPositions({
       page: p.page,
       limit: p.limit,
       sort: p.sort,
@@ -2161,12 +2189,25 @@ function initVideoPlayer() {
   }
 }
 
-// Initialization on DOMContentLoaded
-document.addEventListener('DOMContentLoaded', async () => {
-  setupEventListeners();
-  initVideoPlayer();
-  await dmsApi.init();
-  await loadFilterOptions();
-  await initThailandMap();
-  refreshAll();
-});
+// Resilient Application Bootstrapping
+async function startDashboard() {
+  try {
+    console.log('[DMS Dashboard] Initializing application...');
+    setupEventListeners();
+    initVideoPlayer();
+    await dmsApi.init();
+    await loadFilterOptions();
+    await initThailandMap();
+    refreshAll();
+    console.log('[DMS Dashboard] Initialization complete!');
+  } catch (err) {
+    console.error('[DMS Dashboard] Initialization error:', err);
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', startDashboard);
+} else {
+  startDashboard();
+}
+

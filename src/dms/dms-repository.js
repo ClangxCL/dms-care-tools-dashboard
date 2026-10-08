@@ -650,7 +650,7 @@ export class DmsRepository {
     const total = sorted.length;
     const totalPages = Math.ceil(total / parsedLimit) || 1;
     const offset = (parsedPage - 1) * parsedLimit;
-    const data = sorted.slice(offset, offset + parsedLimit).map((r) => r.toJSON());
+    const data = sorted.slice(offset, offset + parsedLimit).map((r) => (typeof r.toJSON === 'function' ? r.toJSON() : r));
 
     return {
       data,
