@@ -16,6 +16,9 @@ const MIME_TYPES = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.png': 'image/png',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.ogg': 'video/ogg',
 };
 
 /**
@@ -33,8 +36,14 @@ export function extractFilterParams(searchParams) {
     'hospitalLevel',
     'cleanedPosition',
     'position',
+    'affiliation',
+    'facility',
+    'hospitalName',
+    'hospitalCode',
     'status',
     'year',
+    'yearBE',
+    'yearCE',
     'month',
     'yearMonth',
     'q',
@@ -84,7 +93,7 @@ export function createDmsServer(options = {}) {
       return;
     }
 
-    if (req.method !== 'GET') {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Method not allowed' }));
       return;
@@ -247,6 +256,36 @@ export function createDmsServer(options = {}) {
         return;
       }
 
+      if (pathname === '/api/dms/positions') {
+        const page = searchParams.get('page') || 1;
+        const limit = searchParams.get('limit') || 25;
+        const sort = searchParams.get('sort') || 'totalUsers';
+        const order = searchParams.get('order') || 'desc';
+
+        const result = repo.getPositionAggregations({
+          filters,
+          page,
+          limit,
+          sort,
+          order,
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      if (pathname === '/api/dms/positions/export') {
+        const csvContent = repo.toPositionCsv(filters);
+        const timestamp = new Date().toISOString().slice(0, 10);
+        res.writeHead(200, {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="dms_positions_${timestamp}.csv"`,
+        });
+        res.end(csvContent);
+        return;
+      }
+
       res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ error: 'DMS API endpoint not found' }));
       return;
@@ -282,13 +321,46 @@ export function createDmsServer(options = {}) {
       const ext = path.extname(resolvedFilePath).toLowerCase();
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
 
+      // Support HTTP Range requests for video and audio streaming
+      const range = req.headers.range;
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1;
+        const chunkSize = (end - start) + 1;
+        const stream = fs.createReadStream(resolvedFilePath, { start, end });
+
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${stats.size}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunkSize,
+          'Content-Type': contentType,
+        });
+        stream.pipe(res);
+        return;
+      }
+
+      if (req.method === 'HEAD') {
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': stats.size,
+        });
+        res.end();
+        return;
+      }
+
       fs.readFile(resolvedFilePath, (readErr, data) => {
         if (readErr) {
           res.writeHead(500, { 'Content-Type': 'text/plain' });
           res.end('Internal Server Error');
           return;
         }
-        res.writeHead(200, { 'Content-Type': contentType });
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': stats.size,
+        });
         res.end(data);
       });
     });

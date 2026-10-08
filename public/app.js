@@ -5,12 +5,14 @@
 
 // Application State
 const state = {
-  activeTab: 'users', // 'users' | 'regions' | 'provinces' | 'facilities'
+  activeTab: 'users', // 'users' | 'regions' | 'provinces' | 'facilities' | 'positions'
   filters: {
     healthRegion: '',
     province: '',
     district: '',
     subdistrict: '',
+    affiliation: '',
+    facility: '',
     hospitalLevel: '',
     cleanedPosition: '',
     status: '',
@@ -53,12 +55,21 @@ const state = {
       total: 0,
       totalPages: 1,
     },
+    positions: {
+      page: 1,
+      limit: 25,
+      sort: 'totalUsers',
+      order: 'desc',
+      total: 0,
+      totalPages: 1,
+    },
   },
   charts: {
     trend: null,
     regions: null,
     levels: null,
     positions: null,
+    affiliations: null,
     status: null,
   },
   map: {
@@ -69,6 +80,7 @@ const state = {
     selectedProvince: null,
   },
   searchDebounceTimer: null,
+  facilityDebounceTimer: null,
 };
 
 // DOM Elements
@@ -93,7 +105,10 @@ const elements = {
   provinceFilter: document.getElementById('provinceFilter'),
   districtFilter: document.getElementById('districtFilter'),
   subdistrictFilter: document.getElementById('subdistrictFilter'),
+  affiliationFilter: document.getElementById('affiliationFilter'),
   levelFilter: document.getElementById('levelFilter'),
+  facilityFilter: document.getElementById('facilityFilter'),
+  facilityDatalist: document.getElementById('facilityDatalist'),
   positionFilter: document.getElementById('positionFilter'),
   statusFilter: document.getElementById('statusFilter'),
   resetFiltersBtn: document.getElementById('resetFiltersBtn'),
@@ -108,6 +123,9 @@ const elements = {
   trendModeBoth: document.getElementById('trendModeBoth'),
   trendModeNew: document.getElementById('trendModeNew'),
   trendModeCumulative: document.getElementById('trendModeCumulative'),
+
+  // Chart Canvas Elements
+  affiliationsChart: document.getElementById('affiliationsChart'),
 
   // Map elements
   thailandMap: document.getElementById('thailandMap'),
@@ -128,20 +146,24 @@ const elements = {
   tabRegionsBtn: document.getElementById('tabRegionsBtn'),
   tabProvincesBtn: document.getElementById('tabProvincesBtn'),
   tabFacilitiesBtn: document.getElementById('tabFacilitiesBtn'),
+  tabPositionsBtn: document.getElementById('tabPositionsBtn'),
   regionCountPill: document.getElementById('regionCountPill'),
   provinceCountPill: document.getElementById('provinceCountPill'),
   facilityCountPill: document.getElementById('facilityCountPill'),
+  positionCountPill: document.getElementById('positionCountPill'),
 
   usersTableWrapper: document.getElementById('usersTableWrapper'),
   regionsTableWrapper: document.getElementById('regionsTableWrapper'),
   provincesTableWrapper: document.getElementById('provincesTableWrapper'),
   facilitiesTableWrapper: document.getElementById('facilitiesTableWrapper'),
+  positionsTableWrapper: document.getElementById('positionsTableWrapper'),
 
   tableRecordCount: document.getElementById('tableRecordCount'),
   recordsTableBody: document.getElementById('recordsTableBody'),
   regionsTableBody: document.getElementById('regionsTableBody'),
   provincesTableBody: document.getElementById('provincesTableBody'),
   facilitiesTableBody: document.getElementById('facilitiesTableBody'),
+  positionsTableBody: document.getElementById('positionsTableBody'),
 
   limitSelect: document.getElementById('limitSelect'),
   paginationInfo: document.getElementById('paginationInfo'),
@@ -153,6 +175,7 @@ const elements = {
   regionsTableHeaders: document.querySelectorAll('#regionsTable thead th'),
   provincesTableHeaders: document.querySelectorAll('#provincesTable thead th'),
   facilitiesTableHeaders: document.querySelectorAll('#facilitiesTable thead th'),
+  positionsTableHeaders: document.querySelectorAll('#positionsTable thead th'),
 };
 
 // Utilities
@@ -183,6 +206,219 @@ function escapeHtml(str) {
 }
 
 /* ==================================================== */
+/* UNIFIED DUAL-MODE DATA LAYER (NODE SERVER / GH-PAGES)*/
+/* ==================================================== */
+const dmsApi = {
+  isStaticMode: false,
+  clientRepo: null,
+
+  async init() {
+    const isGithub = window.location.hostname.endsWith('github.io');
+    const isFile = window.location.protocol === 'file:';
+    if (isGithub || isFile) {
+      await this.initStaticMode();
+      return;
+    }
+
+    try {
+      const probe = await fetch('/api/dms/summary', { method: 'GET' });
+      if (!probe.ok) {
+        await this.initStaticMode();
+      }
+    } catch (e) {
+      await this.initStaticMode();
+    }
+  },
+
+  async initStaticMode() {
+    this.isStaticMode = true;
+    console.log('[DMS Dashboard] Initializing Client-Side In-Memory Engine (GitHub Pages mode)...');
+    try {
+      const res = await fetch('dms-data.json');
+      if (!res.ok) throw new Error('Could not load dms-data.json');
+      const records = await res.json();
+      const RepoClass = window.DmsClientRepository || globalThis.DmsClientRepository;
+      if (RepoClass) {
+        this.clientRepo = new RepoClass(records);
+        console.log(`[DMS Dashboard] Client Engine loaded ${records.length} records in memory!`);
+      }
+    } catch (err) {
+      console.error('[DMS Dashboard] Failed to load static dataset:', err);
+    }
+  },
+
+  async getFilters(context = {}) {
+    if (this.isStaticMode && this.clientRepo) {
+      return this.clientRepo.getDistinctFilterValues(context);
+    }
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(context)) {
+      if (v) params.set(k, v);
+    }
+    const q = params.toString();
+    const res = await fetch(`/api/dms/filters${q ? '?' + q : ''}`);
+    if (!res.ok) throw new Error('API request failed');
+    return res.json();
+  },
+
+  async getSummary(filters = {}) {
+    if (this.isStaticMode && this.clientRepo) {
+      return this.clientRepo.getSummary(filters);
+    }
+    const q = buildQueryString(filters);
+    const res = await fetch(`/api/dms/summary${q ? '?' + q : ''}`);
+    if (!res.ok) throw new Error('API request failed');
+    return res.json();
+  },
+
+  async getCharts(filters = {}) {
+    if (this.isStaticMode && this.clientRepo) {
+      return this.clientRepo.getChartsData(filters);
+    }
+    const q = buildQueryString(filters);
+    const res = await fetch(`/api/dms/charts${q ? '?' + q : ''}`);
+    if (!res.ok) throw new Error('API request failed');
+    return res.json();
+  },
+
+  async getProvinces(filters = {}) {
+    if (this.isStaticMode && this.clientRepo) {
+      return this.clientRepo.getProvinceAnalytics(filters);
+    }
+    const q = buildQueryString(filters);
+    const res = await fetch(`/api/dms/provinces${q ? '?' + q : ''}`);
+    if (!res.ok) throw new Error('API request failed');
+    return res.json();
+  },
+
+  async getRecords(options = {}) {
+    if (this.isStaticMode && this.clientRepo) {
+      return this.clientRepo.getPaginatedRecords(options);
+    }
+    const q = buildQueryString({
+      page: options.page,
+      limit: options.limit,
+      sort: options.sort,
+      order: options.order,
+      ...options.filters,
+    });
+    const res = await fetch(`/api/dms/records${q ? '?' + q : ''}`);
+    if (!res.ok) throw new Error('API request failed');
+    return res.json();
+  },
+
+  async getRegions(options = {}) {
+    if (this.isStaticMode && this.clientRepo) {
+      return this.clientRepo.getRegionAggregations(options);
+    }
+    const q = buildQueryString({
+      page: options.page,
+      limit: options.limit,
+      sort: options.sort,
+      order: options.order,
+      ...options.filters,
+    });
+    const res = await fetch(`/api/dms/regions${q ? '?' + q : ''}`);
+    if (!res.ok) throw new Error('API request failed');
+    return res.json();
+  },
+
+  async getProvinceSummary(options = {}) {
+    if (this.isStaticMode && this.clientRepo) {
+      return this.clientRepo.getProvinceAggregations(options);
+    }
+    const q = buildQueryString({
+      page: options.page,
+      limit: options.limit,
+      sort: options.sort,
+      order: options.order,
+      ...options.filters,
+    });
+    const res = await fetch(`/api/dms/province-summary${q ? '?' + q : ''}`);
+    if (!res.ok) throw new Error('API request failed');
+    return res.json();
+  },
+
+  async getFacilities(options = {}) {
+    if (this.isStaticMode && this.clientRepo) {
+      return this.clientRepo.getFacilityAggregations(options);
+    }
+    const q = buildQueryString({
+      page: options.page,
+      limit: options.limit,
+      sort: options.sort,
+      order: options.order,
+      ...options.filters,
+    });
+    const res = await fetch(`/api/dms/facilities${q ? '?' + q : ''}`);
+    if (!res.ok) throw new Error('API request failed');
+    return res.json();
+  },
+
+  async getPositions(options = {}) {
+    if (this.isStaticMode && this.clientRepo) {
+      return this.clientRepo.getPositionAggregations(options);
+    }
+    const q = buildQueryString({
+      page: options.page,
+      limit: options.limit,
+      sort: options.sort,
+      order: options.order,
+      ...options.filters,
+    });
+    const res = await fetch(`/api/dms/positions${q ? '?' + q : ''}`);
+    if (!res.ok) throw new Error('API request failed');
+    return res.json();
+  },
+
+  exportCsv(type, filters = {}) {
+    if (this.isStaticMode && this.clientRepo) {
+      const now = new Date().toISOString().slice(0, 10);
+      let csvContent = '';
+      let filename = `dms_export_${now}.csv`;
+      if (type === 'users') {
+        csvContent = this.clientRepo.toCsv(filters);
+        filename = `dms_records_${now}.csv`;
+      } else if (type === 'regions') {
+        csvContent = this.clientRepo.toRegionCsv(filters);
+        filename = `dms_regions_${now}.csv`;
+      } else if (type === 'provinces') {
+        csvContent = this.clientRepo.toProvinceCsv(filters);
+        filename = `dms_provinces_${now}.csv`;
+      } else if (type === 'facilities') {
+        csvContent = this.clientRepo.toFacilityCsv(filters);
+        filename = `dms_facilities_${now}.csv`;
+      } else if (type === 'positions') {
+        csvContent = this.clientRepo.toPositionCsv(filters);
+        filename = `dms_positions_${now}.csv`;
+      }
+      this.triggerDownload(csvContent, filename);
+      return;
+    }
+
+    const q = buildQueryString(filters);
+    let endpoint = '/api/dms/export';
+    if (type === 'regions') endpoint = '/api/dms/regions/export';
+    else if (type === 'provinces') endpoint = '/api/dms/province-summary/export';
+    else if (type === 'facilities') endpoint = '/api/dms/facilities/export';
+    else if (type === 'positions') endpoint = '/api/dms/positions/export';
+    window.location.href = `${endpoint}${q ? '?' + q : ''}`;
+  },
+
+  triggerDownload(csvContent, filename) {
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+};
+
+/* ==================================================== */
 /* 1. FILTER OPTIONS & CASCADING LOGIC                  */
 /* ==================================================== */
 
@@ -204,19 +440,64 @@ const THAI_MONTHS_SELECT = [
 
 async function loadFilterOptions() {
   try {
-    const res = await fetch('/api/dms/filters');
-    if (!res.ok) throw new Error('Failed to load filter options');
-    const data = await res.json();
+    const data = await dmsApi.getFilters();
 
     populateYearSelect(data.years);
     populateMonthSelect(data.months);
     populateSelect(elements.regionFilter, data.healthRegions, 'ทั้งหมด (ทุกเขตสุขภาพ)');
     populateSelect(elements.provinceFilter, data.provinces, 'ทั้งหมด (ทุกจังหวัด)');
+    populateSelect(elements.districtFilter, data.districts, 'ทั้งหมด (ทุกอำเภอ)');
+    populateSelect(elements.subdistrictFilter, data.subdistricts, 'ทั้งหมด (ทุกตำบล)');
+    populateSelect(elements.affiliationFilter, data.affiliations, 'ทั้งหมด (ทุกสังกัด)');
     populateSelect(elements.levelFilter, data.hospitalLevels, 'ทั้งหมด (ทุกระดับ)');
     populateSelect(elements.positionFilter, data.positions, 'ทั้งหมด (ทุกตำแหน่ง)');
     populateSelect(elements.statusFilter, data.statuses, 'ทั้งหมด (ทุกสถานะ)');
+    populateFacilityDatalist(data.facilities);
+
+    elements.districtFilter.disabled = false;
+    elements.subdistrictFilter.disabled = false;
   } catch (err) {
     console.error('Error loading filter options:', err);
+  }
+}
+
+function populateFacilityDatalist(facilities) {
+  if (!elements.facilityDatalist) return;
+  elements.facilityDatalist.innerHTML = '';
+  if (Array.isArray(facilities)) {
+    facilities.slice(0, 1000).forEach((fac) => {
+      const opt = document.createElement('option');
+      opt.value = fac.displayName || fac.name;
+      elements.facilityDatalist.appendChild(opt);
+    });
+  }
+}
+
+async function updateFacilityDatalist() {
+  try {
+    const data = await dmsApi.getFilters({
+      healthRegion: state.filters.healthRegion,
+      province: state.filters.province,
+      district: state.filters.district,
+      affiliation: state.filters.affiliation,
+    });
+    if (data && data.facilities) {
+      populateFacilityDatalist(data.facilities);
+    }
+  } catch (err) {
+    console.error('Error updating facility datalist:', err);
+  }
+}
+
+async function loadProvincesForRegion(healthRegion) {
+  if (!elements.provinceFilter) return;
+  try {
+    const data = await dmsApi.getFilters({ healthRegion });
+    if (data && data.provinces) {
+      populateSelect(elements.provinceFilter, data.provinces, 'ทั้งหมด (ทุกจังหวัด)');
+    }
+  } catch (err) {
+    console.error('Error loading provinces for region:', err);
   }
 }
 
@@ -228,11 +509,16 @@ function populateYearSelect(years) {
     years.forEach((y) => {
       const opt = document.createElement('option');
       opt.value = y;
-      opt.textContent = `ปี ${y + 543} (ค.ศ. ${y})`;
+      opt.textContent = y > 2400 ? `พ.ศ. ${y}` : `พ.ศ. ${y + 543} (ค.ศ. ${y})`;
       elements.yearFilter.appendChild(opt);
     });
   }
-  if (currentVal && years && years.map(String).includes(String(currentVal))) {
+  const unspecOpt = document.createElement('option');
+  unspecOpt.value = 'unspecified';
+  unspecOpt.textContent = 'ไม่ระบุปี (Missing)';
+  elements.yearFilter.appendChild(unspecOpt);
+
+  if (currentVal && ((years && years.map(String).includes(String(currentVal))) || currentVal === 'unspecified')) {
     elements.yearFilter.value = currentVal;
   }
 }
@@ -259,11 +545,8 @@ function populateMonthSelect(months) {
 async function loadMonthsForYear(year) {
   if (!elements.monthFilter) return;
   try {
-    const query = year ? `?year=${encodeURIComponent(year)}` : '';
-    const res = await fetch(`/api/dms/filters${query}`);
-    if (!res.ok) throw new Error('Failed to load months for year');
-    const data = await res.json();
-    populateMonthSelect(data.months || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    const data = await dmsApi.getFilters({ year });
+    populateMonthSelect((data && data.months) || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   } catch (err) {
     console.error('Error loading months for year:', err);
     populateMonthSelect([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
@@ -288,69 +571,82 @@ function populateSelect(selectEl, items, defaultLabel) {
 }
 
 /**
- * Cascading: Loads districts for selected province
+ * Synchronizes Region, Province, District, and Subdistrict dropdowns
+ * based on current state.filters. Always keeps District and Subdistrict accessible!
  */
-async function loadDistrictsForProvince(province) {
-  if (!province) {
-    elements.districtFilter.disabled = true;
-    elements.districtFilter.innerHTML = '<option value="">ทั้งหมด (เลือกจังหวัดก่อน)</option>';
-    elements.subdistrictFilter.disabled = true;
-    elements.subdistrictFilter.innerHTML = '<option value="">ทั้งหมด (เลือกอำเภอก่อน)</option>';
-    state.filters.district = '';
-    state.filters.subdistrict = '';
-    return;
-  }
-
+async function syncGeoFilters(trigger) {
   try {
-    elements.districtFilter.disabled = true;
-    elements.districtFilter.innerHTML = '<option value="">กำลังโหลดอำเภอ...</option>';
+    const data = await dmsApi.getFilters({
+      healthRegion: state.filters.healthRegion,
+      province: state.filters.province,
+      district: state.filters.district,
+      subdistrict: state.filters.subdistrict,
+    });
 
-    const res = await fetch(`/api/dms/filters?province=${encodeURIComponent(province)}`);
-    if (!res.ok) throw new Error('Failed to load districts');
-    const data = await res.json();
+    if (trigger === 'region') {
+      populateSelect(elements.provinceFilter, data.provinces, 'ทั้งหมด (ทุกจังหวัด)');
+      populateSelect(elements.districtFilter, data.districts, 'ทั้งหมด (ทุกอำเภอ)');
+      populateSelect(elements.subdistrictFilter, data.subdistricts, 'ทั้งหมด (ทุกตำบล)');
+    } else if (trigger === 'province') {
+      populateSelect(elements.districtFilter, data.districts, 'ทั้งหมด (ทุกอำเภอ)');
+      populateSelect(elements.subdistrictFilter, data.subdistricts, 'ทั้งหมด (ทุกตำบล)');
+
+      if (!state.filters.healthRegion && data.healthRegions && data.healthRegions.length === 1) {
+        state.filters.healthRegion = data.healthRegions[0];
+        elements.regionFilter.value = data.healthRegions[0];
+      }
+    } else if (trigger === 'district') {
+      populateSelect(elements.subdistrictFilter, data.subdistricts, 'ทั้งหมด (ทุกตำบล)');
+
+      if (!state.filters.province && data.provinces && data.provinces.length === 1) {
+        state.filters.province = data.provinces[0];
+        elements.provinceFilter.value = data.provinces[0];
+        selectProvince(data.provinces[0]);
+      }
+      if (!state.filters.healthRegion && data.healthRegions && data.healthRegions.length === 1) {
+        state.filters.healthRegion = data.healthRegions[0];
+        elements.regionFilter.value = data.healthRegions[0];
+      }
+    } else if (trigger === 'subdistrict') {
+      if (!state.filters.district && data.districts && data.districts.length === 1) {
+        state.filters.district = data.districts[0];
+        elements.districtFilter.value = data.districts[0];
+      }
+      if (!state.filters.province && data.provinces && data.provinces.length === 1) {
+        state.filters.province = data.provinces[0];
+        elements.provinceFilter.value = data.provinces[0];
+        selectProvince(data.provinces[0]);
+      }
+      if (!state.filters.healthRegion && data.healthRegions && data.healthRegions.length === 1) {
+        state.filters.healthRegion = data.healthRegions[0];
+        elements.regionFilter.value = data.healthRegions[0];
+      }
+    } else {
+      populateSelect(elements.regionFilter, data.healthRegions, 'ทั้งหมด (ทุกเขตสุขภาพ)');
+      populateSelect(elements.provinceFilter, data.provinces, 'ทั้งหมด (ทุกจังหวัด)');
+      populateSelect(elements.districtFilter, data.districts, 'ทั้งหมด (ทุกอำเภอ)');
+      populateSelect(elements.subdistrictFilter, data.subdistricts, 'ทั้งหมด (ทุกตำบล)');
+    }
 
     elements.districtFilter.disabled = false;
-    populateSelect(elements.districtFilter, data.districts, 'ทั้งหมด (ทุกอำเภอ)');
-
-    // Reset subdistrict
-    elements.subdistrictFilter.disabled = true;
-    elements.subdistrictFilter.innerHTML = '<option value="">ทั้งหมด (เลือกอำเภอก่อน)</option>';
-    state.filters.subdistrict = '';
+    elements.subdistrictFilter.disabled = false;
   } catch (err) {
-    console.error('Error loading districts:', err);
+    console.error('Error syncing geo filters:', err);
     elements.districtFilter.disabled = false;
+    elements.subdistrictFilter.disabled = false;
   }
 }
 
-/**
- * Cascading: Loads subdistricts for selected district
- */
+// Backward-compatible cascading aliases
+async function loadDistrictsForProvince(province) {
+  state.filters.province = province || '';
+  await syncGeoFilters('province');
+}
+
 async function loadSubdistrictsForDistrict(province, district) {
-  if (!district) {
-    elements.subdistrictFilter.disabled = true;
-    elements.subdistrictFilter.innerHTML = '<option value="">ทั้งหมด (เลือกอำเภอก่อน)</option>';
-    state.filters.subdistrict = '';
-    return;
-  }
-
-  try {
-    elements.subdistrictFilter.disabled = true;
-    elements.subdistrictFilter.innerHTML = '<option value="">กำลังโหลดตำบล...</option>';
-
-    const query = new URLSearchParams();
-    if (province) query.set('province', province);
-    query.set('district', district);
-
-    const res = await fetch(`/api/dms/filters?${query.toString()}`);
-    if (!res.ok) throw new Error('Failed to load subdistricts');
-    const data = await res.json();
-
-    elements.subdistrictFilter.disabled = false;
-    populateSelect(elements.subdistrictFilter, data.subdistricts, 'ทั้งหมด (ทุกตำบล)');
-  } catch (err) {
-    console.error('Error loading subdistricts:', err);
-    elements.subdistrictFilter.disabled = false;
-  }
+  state.filters.province = province || '';
+  state.filters.district = district || '';
+  await syncGeoFilters('district');
 }
 
 /* ==================================================== */
@@ -359,11 +655,7 @@ async function loadSubdistrictsForDistrict(province, district) {
 
 async function loadKpiSummary() {
   try {
-    const query = buildQueryString();
-    const url = `/api/dms/summary${query ? '?' + query : ''}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Failed to fetch summary');
-    const summary = await res.json();
+    const summary = await dmsApi.getSummary(state.filters);
 
     elements.kpiTotalUsers.textContent = formatNumber(summary.totalUsers);
     elements.kpiActiveUsers.textContent = formatNumber(summary.activeUsers);
@@ -419,7 +711,7 @@ async function initThailandMap() {
       subdomains: 'abcd',
     }).addTo(map);
 
-    const res = await fetch('/thailand-provinces.geojson');
+    const res = await fetch('thailand-provinces.geojson');
     if (!res.ok) throw new Error('Failed to load GeoJSON');
     const geoData = await res.json();
     state.map.geoData = geoData;
@@ -434,11 +726,8 @@ async function updateMapAnalytics() {
   if (!state.map.leafletInstance || !state.map.geoData) return;
 
   try {
-    const query = buildQueryString();
-    const res = await fetch(`/api/dms/provinces${query ? '?' + query : ''}`);
-    if (!res.ok) throw new Error('Failed to fetch province analytics');
-    const data = await res.json();
-    state.map.provinceAnalytics = data.provinces || {};
+    const data = await dmsApi.getProvinces(state.filters);
+    state.map.provinceAnalytics = (data && data.provinces) || {};
 
     if (state.map.geoJsonLayer) {
       state.map.leafletInstance.removeLayer(state.map.geoJsonLayer);
@@ -496,8 +785,18 @@ async function updateMapAnalytics() {
               });
             }
           },
-          click: () => {
+          click: async () => {
             selectProvince(provName, provEn);
+            state.filters.province = provName;
+            elements.provinceFilter.value = provName;
+            state.filters.district = '';
+            state.filters.subdistrict = '';
+            elements.districtFilter.value = '';
+            elements.subdistrictFilter.value = '';
+            Object.keys(state.pagination).forEach((k) => (state.pagination[k].page = 1));
+            await syncGeoFilters('province');
+            await updateFacilityDatalist();
+            refreshAll();
           },
         });
       },
@@ -597,11 +896,7 @@ function clearProvinceSelection() {
 
 async function loadCharts() {
   try {
-    const query = buildQueryString();
-    const url = `/api/dms/charts${query ? '?' + query : ''}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Failed to fetch charts data');
-    const chartsData = await res.json();
+    const chartsData = await dmsApi.getCharts(state.filters);
 
     state.trendData = chartsData.registrationTrend;
     renderTrendChart(chartsData.registrationTrend);
@@ -609,6 +904,9 @@ async function loadCharts() {
     renderStatusChart(chartsData.status);
     renderPositionsChart(chartsData.positions);
     renderLevelsChart(chartsData.hospitalLevels);
+    if (chartsData.affiliations) {
+      renderAffiliationsChart(chartsData.affiliations);
+    }
   } catch (err) {
     console.error('Error loading charts:', err);
   }
@@ -983,8 +1281,56 @@ function renderLevelsChart(data) {
   });
 }
 
+function renderAffiliationsChart(data) {
+  if (!data || !elements.affiliationsChart) return;
+  const ctx = elements.affiliationsChart.getContext('2d');
+  if (state.charts.affiliations) state.charts.affiliations.destroy();
+
+  const colors = [
+    '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6',
+    '#ec4899', '#06b6d4', '#14b8a6', '#6366f1',
+    '#64748b', '#d946ef'
+  ];
+
+  state.charts.affiliations = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: data.labels,
+      datasets: [
+        {
+          data: data.data,
+          backgroundColor: colors.slice(0, data.labels.length),
+          borderWidth: 2,
+          borderColor: '#111e38',
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: '#cbd5e1',
+            font: { family: 'Sarabun', size: 11 },
+            boxWidth: 12,
+            padding: 10,
+          },
+        },
+        tooltip: {
+          backgroundColor: '#0f172a',
+          titleFont: { family: 'Sarabun' },
+          bodyFont: { family: 'Sarabun' },
+        },
+      },
+      cutout: '65%',
+    },
+  });
+}
+
 /* ==================================================== */
-/* 5. TABLES (USERS, REGIONS, PROVINCES, FACILITIES)    */
+/* 5. TABLES (USERS, REGIONS, PROVINCES, FACILITIES, POSITIONS) */
 /* ==================================================== */
 
 function loadActiveTableData() {
@@ -1001,6 +1347,9 @@ function loadActiveTableData() {
     case 'facilities':
       loadFacilitiesTable();
       break;
+    case 'positions':
+      loadPositionsTable();
+      break;
   }
 }
 
@@ -1016,16 +1365,13 @@ async function loadUsersTable() {
     `;
 
     const p = state.pagination.users;
-    const query = buildQueryString({
+    const result = await dmsApi.getRecords({
       page: p.page,
       limit: p.limit,
       sort: p.sort,
       order: p.order,
+      filters: state.filters,
     });
-
-    const res = await fetch(`/api/dms/records?${query}`);
-    if (!res.ok) throw new Error('Failed to fetch records');
-    const result = await res.json();
 
     const { data, pagination } = result;
     p.total = pagination.total;
@@ -1093,16 +1439,13 @@ async function loadRegionsTable() {
     `;
 
     const p = state.pagination.regions;
-    const query = buildQueryString({
+    const result = await dmsApi.getRegions({
       page: p.page,
       limit: p.limit,
       sort: p.sort,
       order: p.order,
+      filters: state.filters,
     });
-
-    const res = await fetch(`/api/dms/regions?${query}`);
-    if (!res.ok) throw new Error('Failed to fetch regions summary');
-    const result = await res.json();
 
     const { data, pagination } = result;
     p.total = pagination.total;
@@ -1177,16 +1520,13 @@ async function loadProvincesTable() {
     `;
 
     const p = state.pagination.provinces;
-    const query = buildQueryString({
+    const result = await dmsApi.getProvinceSummary({
       page: p.page,
       limit: p.limit,
       sort: p.sort,
       order: p.order,
+      filters: state.filters,
     });
-
-    const res = await fetch(`/api/dms/province-summary?${query}`);
-    if (!res.ok) throw new Error('Failed to fetch province summary');
-    const result = await res.json();
 
     const { data, pagination } = result;
     p.total = pagination.total;
@@ -1262,16 +1602,13 @@ async function loadFacilitiesTable() {
     `;
 
     const p = state.pagination.facilities;
-    const query = buildQueryString({
+    const result = await dmsApi.getFacilities({
       page: p.page,
       limit: p.limit,
       sort: p.sort,
       order: p.order,
+      filters: state.filters,
     });
-
-    const res = await fetch(`/api/dms/facilities?${query}`);
-    if (!res.ok) throw new Error('Failed to fetch facilities');
-    const result = await res.json();
 
     const { data, pagination } = result;
     p.total = pagination.total;
@@ -1317,6 +1654,84 @@ async function loadFacilitiesTable() {
     elements.facilitiesTableBody.innerHTML = `
       <tr>
         <td colspan="7" class="table-empty" style="color: #ef4444;">เกิดข้อผิดพลาดในการโหลดข้อมูล</td>
+      </tr>
+    `;
+  }
+}
+
+/**
+ * Tab 5: Position Aggregation Table
+ */
+async function loadPositionsTable() {
+  try {
+    elements.positionsTableBody.innerHTML = `
+      <tr>
+        <td colspan="6" class="table-loading">กำลังโหลดข้อมูลสรุปตามตำแหน่ง...</td>
+      </tr>
+    `;
+
+    const p = state.pagination.positions;
+    const result = await dmsApi.getPositionAggregations ? await dmsApi.getPositions({
+      page: p.page,
+      limit: p.limit,
+      sort: p.sort,
+      order: p.order,
+      filters: state.filters,
+    }) : await dmsApi.getPositions({
+      page: p.page,
+      limit: p.limit,
+      sort: p.sort,
+      order: p.order,
+      filters: state.filters,
+    });
+
+    const { data, pagination } = result;
+    p.total = pagination.total;
+    p.totalPages = pagination.totalPages;
+
+    elements.tableRecordCount.textContent = `พบ ${formatNumber(pagination.total)} ตำแหน่ง`;
+
+    if (!data || data.length === 0) {
+      elements.positionsTableBody.innerHTML = `
+        <tr>
+          <td colspan="6" class="table-empty">ไม่พบตำแหน่งที่ตรงกับเงื่อนไขการค้นหา</td>
+        </tr>
+      `;
+      renderPagination(0, 0, 0, 'positions');
+      return;
+    }
+
+    const rowsHtml = data
+      .map((pos) => {
+        return `
+          <tr>
+            <td><span class="badge badge-level">${escapeHtml(pos.group || '-')}</span></td>
+            <td><strong>${escapeHtml(pos.cleanedPosition)}</strong></td>
+            <td><span class="badge badge-count">${formatNumber(pos.totalUsers)} คน</span></td>
+            <td><span class="text-green font-semibold">${formatNumber(pos.activeUsers)}</span> <small class="text-muted">(${pos.activePercentage}%)</small></td>
+            <td><span class="text-red font-semibold">${formatNumber(pos.blockedUsers)}</span> <small class="text-muted">(${pos.blockedPercentage}%)</small></td>
+            <td>
+              <div class="status-cell-wrap">
+                <div class="status-ratio-text">
+                  <span class="text-blue font-semibold">${pos.percentage}%</span>
+                </div>
+                <div class="status-bar-track">
+                  <div class="status-bar-active" style="width: ${Math.min(100, pos.percentage * 2)}%; background: #38bdf8;"></div>
+                </div>
+              </div>
+            </td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    elements.positionsTableBody.innerHTML = rowsHtml;
+    renderPagination(pagination.page, pagination.limit, pagination.total, 'positions');
+  } catch (err) {
+    console.error('Error loading positions table:', err);
+    elements.positionsTableBody.innerHTML = `
+      <tr>
+        <td colspan="6" class="table-empty" style="color: #ef4444;">เกิดข้อผิดพลาดในการโหลดข้อมูลตำแหน่ง</td>
       </tr>
     `;
   }
@@ -1379,6 +1794,7 @@ function switchTab(tabKey) {
     { key: 'regions', btn: elements.tabRegionsBtn, wrapper: elements.regionsTableWrapper, label: 'ส่งออก CSV เขตสุขภาพ' },
     { key: 'provinces', btn: elements.tabProvincesBtn, wrapper: elements.provincesTableWrapper, label: 'ส่งออก CSV รายจังหวัด' },
     { key: 'facilities', btn: elements.tabFacilitiesBtn, wrapper: elements.facilitiesTableWrapper, label: 'ส่งออก CSV รายหน่วยงาน' },
+    { key: 'positions', btn: elements.tabPositionsBtn, wrapper: elements.positionsTableWrapper, label: 'ส่งออก CSV รายตำแหน่ง' },
   ];
 
   tabBtns.forEach(({ key, btn, wrapper, label }) => {
@@ -1405,6 +1821,7 @@ function setupEventListeners() {
   elements.tabRegionsBtn.addEventListener('click', () => switchTab('regions'));
   elements.tabProvincesBtn.addEventListener('click', () => switchTab('provinces'));
   elements.tabFacilitiesBtn.addEventListener('click', () => switchTab('facilities'));
+  elements.tabPositionsBtn.addEventListener('click', () => switchTab('positions'));
 
   // Search with debounce
   elements.searchQuery.addEventListener('input', (e) => {
@@ -1448,9 +1865,19 @@ function setupEventListeners() {
   });
 
   // Health Region Filter
-  elements.regionFilter.addEventListener('change', (e) => {
+  elements.regionFilter.addEventListener('change', async (e) => {
     state.filters.healthRegion = e.target.value;
+    state.filters.province = '';
+    state.filters.district = '';
+    state.filters.subdistrict = '';
+    elements.provinceFilter.value = '';
+    elements.districtFilter.value = '';
+    elements.subdistrictFilter.value = '';
+    clearProvinceSelection();
+
     Object.keys(state.pagination).forEach((k) => (state.pagination[k].page = 1));
+    await syncGeoFilters('region');
+    await updateFacilityDatalist();
     refreshAll();
   });
 
@@ -1460,10 +1887,12 @@ function setupEventListeners() {
     state.filters.province = prov;
     state.filters.district = '';
     state.filters.subdistrict = '';
+    elements.districtFilter.value = '';
+    elements.subdistrictFilter.value = '';
     Object.keys(state.pagination).forEach((k) => (state.pagination[k].page = 1));
 
-    // Cascade into District dropdown
-    await loadDistrictsForProvince(prov);
+    await syncGeoFilters('province');
+    await updateFacilityDatalist();
 
     if (prov) {
       selectProvince(prov);
@@ -1478,18 +1907,43 @@ function setupEventListeners() {
     const dist = e.target.value;
     state.filters.district = dist;
     state.filters.subdistrict = '';
+    elements.subdistrictFilter.value = '';
     Object.keys(state.pagination).forEach((k) => (state.pagination[k].page = 1));
 
-    // Cascade into Subdistrict dropdown
-    await loadSubdistrictsForDistrict(state.filters.province, dist);
+    await syncGeoFilters('district');
+    await updateFacilityDatalist();
     refreshAll();
   });
 
   // Subdistrict Filter
-  elements.subdistrictFilter.addEventListener('change', (e) => {
-    state.filters.subdistrict = e.target.value;
+  elements.subdistrictFilter.addEventListener('change', async (e) => {
+    const sub = e.target.value;
+    state.filters.subdistrict = sub;
     Object.keys(state.pagination).forEach((k) => (state.pagination[k].page = 1));
+
+    if (sub) {
+      await syncGeoFilters('subdistrict');
+    }
+    await updateFacilityDatalist();
     refreshAll();
+  });
+
+  // Affiliation Filter
+  elements.affiliationFilter.addEventListener('change', async (e) => {
+    state.filters.affiliation = e.target.value;
+    Object.keys(state.pagination).forEach((k) => (state.pagination[k].page = 1));
+    await updateFacilityDatalist();
+    refreshAll();
+  });
+
+  // Facility Filter with datalist input
+  elements.facilityFilter.addEventListener('input', (e) => {
+    clearTimeout(state.facilityDebounceTimer);
+    state.facilityDebounceTimer = setTimeout(() => {
+      state.filters.facility = e.target.value.trim();
+      Object.keys(state.pagination).forEach((k) => (state.pagination[k].page = 1));
+      refreshAll();
+    }, 300);
   });
 
   // Hospital Level Filter
@@ -1520,6 +1974,8 @@ function setupEventListeners() {
       province: '',
       district: '',
       subdistrict: '',
+      affiliation: '',
+      facility: '',
       hospitalLevel: '',
       cleanedPosition: '',
       status: '',
@@ -1532,12 +1988,15 @@ function setupEventListeners() {
     elements.monthFilter.value = '';
     elements.regionFilter.value = '';
     elements.provinceFilter.value = '';
+    elements.districtFilter.value = '';
+    elements.subdistrictFilter.value = '';
+    elements.affiliationFilter.value = '';
+    elements.facilityFilter.value = '';
     elements.levelFilter.value = '';
     elements.positionFilter.value = '';
     elements.statusFilter.value = '';
 
-    await loadMonthsForYear('');
-    await loadDistrictsForProvince('');
+    await loadFilterOptions();
     Object.keys(state.pagination).forEach((k) => (state.pagination[k].page = 1));
     clearProvinceSelection();
     refreshAll();
@@ -1548,19 +2007,9 @@ function setupEventListeners() {
     refreshAll();
   });
 
-  // Export CSV Button (Dispatches to active tab endpoint)
+  // Export CSV Button (Dual mode: browser Blob download on GitHub Pages / server download)
   elements.exportBtn.addEventListener('click', () => {
-    const query = buildQueryString();
-    let endpoint = '/api/dms/export';
-    if (state.activeTab === 'regions') {
-      endpoint = '/api/dms/regions/export';
-    } else if (state.activeTab === 'provinces') {
-      endpoint = '/api/dms/province-summary/export';
-    } else if (state.activeTab === 'facilities') {
-      endpoint = '/api/dms/facilities/export';
-    }
-    const url = `${endpoint}${query ? '?' + query : ''}`;
-    window.location.href = url;
+    dmsApi.exportCsv(state.activeTab, state.filters);
   });
 
   // Map Panel Action: Filter dashboard by selected province
@@ -1569,14 +2018,31 @@ function setupEventListeners() {
     const prov = state.map.selectedProvince;
     state.filters.province = prov;
     elements.provinceFilter.value = prov;
-    await loadDistrictsForProvince(prov);
+    state.filters.district = '';
+    state.filters.subdistrict = '';
+    elements.districtFilter.value = '';
+    elements.subdistrictFilter.value = '';
+    await syncGeoFilters('province');
+    await updateFacilityDatalist();
     Object.keys(state.pagination).forEach((k) => (state.pagination[k].page = 1));
     refreshAll();
   });
 
   // Map Panel Close Button
-  elements.panelClearBtn.addEventListener('click', () => {
+  elements.panelClearBtn.addEventListener('click', async () => {
     clearProvinceSelection();
+    if (state.filters.province) {
+      state.filters.province = '';
+      elements.provinceFilter.value = '';
+      state.filters.district = '';
+      state.filters.subdistrict = '';
+      elements.districtFilter.value = '';
+      elements.subdistrictFilter.value = '';
+      Object.keys(state.pagination).forEach((k) => (state.pagination[k].page = 1));
+      await syncGeoFilters('province');
+      await updateFacilityDatalist();
+      refreshAll();
+    }
   });
 
   // Rows Per Page selector
@@ -1617,11 +2083,12 @@ function setupEventListeners() {
     }
   });
 
-  // Table Sorting Wiring for All 4 Tables
+  // Table Sorting Wiring for All 5 Tables
   wireSorting(elements.usersTableHeaders, 'users', loadUsersTable);
   wireSorting(elements.regionsTableHeaders, 'regions', loadRegionsTable);
   wireSorting(elements.provincesTableHeaders, 'provinces', loadProvincesTable);
   wireSorting(elements.facilitiesTableHeaders, 'facilities', loadFacilitiesTable);
+  wireSorting(elements.positionsTableHeaders, 'positions', loadPositionsTable);
 }
 
 function wireSorting(headers, tabKey, reloadFn) {
@@ -1659,9 +2126,46 @@ function updateSortIcons(headers, currentSort, currentOrder) {
   });
 }
 
+function initVideoPlayer() {
+  const video = document.getElementById('dashboardVideo');
+  const chapterBtns = document.querySelectorAll('.video-chapter-btn');
+  if (!video) return;
+
+  if (chapterBtns && chapterBtns.length > 0) {
+    chapterBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const timeSec = parseFloat(btn.getAttribute('data-time') || '0');
+        video.currentTime = timeSec;
+        video.play().catch(() => {});
+        chapterBtns.forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+
+    video.addEventListener('timeupdate', () => {
+      const cur = video.currentTime;
+      let activeIdx = 0;
+      if (cur >= 12) activeIdx = 3;
+      else if (cur >= 8) activeIdx = 2;
+      else if (cur >= 4) activeIdx = 1;
+      else activeIdx = 0;
+
+      chapterBtns.forEach((btn, idx) => {
+        if (idx === activeIdx) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+    });
+  }
+}
+
 // Initialization on DOMContentLoaded
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
+  initVideoPlayer();
+  await dmsApi.init();
   await loadFilterOptions();
   await initThailandMap();
   refreshAll();

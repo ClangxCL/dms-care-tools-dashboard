@@ -47,9 +47,9 @@ describe('DMS Server & REST API Routes', () => {
     const res = await fetch(`${baseUrl}/api/dms/summary`);
     assert.strictEqual(res.status, 200);
     const data = await res.json();
-    assert.strictEqual(data.totalUsers, 4203);
-    assert.strictEqual(data.activeUsers, 4096);
-    assert.strictEqual(data.blockedUsers, 107);
+    assert.strictEqual(data.totalUsers, 4205);
+    assert.strictEqual(data.activeUsers, 4085);
+    assert.strictEqual(data.blockedUsers, 120);
     assert.strictEqual(data.uniqueHealthRegions, 13);
   });
 
@@ -89,7 +89,7 @@ describe('DMS Server & REST API Routes', () => {
     assert.strictEqual(data.data.length, 15);
     assert.strictEqual(data.pagination.page, 1);
     assert.strictEqual(data.pagination.limit, 15);
-    assert.strictEqual(data.pagination.total, 4203);
+    assert.strictEqual(data.pagination.total, 4205);
   });
 
   it('GET /api/dms/export should return CSV attachment with UTF-8 BOM', async () => {
@@ -217,11 +217,38 @@ describe('DMS Server & REST API Routes', () => {
     assert.strictEqual(res.status, 200);
     const data = await res.json();
     assert.ok(Array.isArray(data.years));
-    assert.ok(data.years.includes(2026));
+    assert.ok(data.years.includes(2569) || data.years.includes(2026));
     assert.ok(Array.isArray(data.months));
     assert.ok(data.months.includes(1));
     assert.ok(data.months.includes(9));
     assert.ok(!data.months.includes(10));
+  });
+
+  it('GET /api/dms/positions should return paginated position summary', async () => {
+    const res = await fetch(`${baseUrl}/api/dms/positions?page=1&limit=10`);
+    assert.strictEqual(res.status, 200);
+    const result = await res.json();
+    assert.ok(Array.isArray(result.data));
+    assert.strictEqual(result.pagination.page, 1);
+    assert.strictEqual(result.pagination.limit, 10);
+    assert.ok(result.pagination.total > 0);
+    const first = result.data[0];
+    assert.ok(first.cleanedPosition);
+    assert.ok(first.group);
+    assert.ok(typeof first.totalUsers === 'number');
+  });
+
+  it('GET /api/dms/positions/export should stream position CSV with UTF-8 BOM', async () => {
+    const res = await fetch(`${baseUrl}/api/dms/positions/export`);
+    assert.strictEqual(res.status, 200);
+    assert.ok(res.headers.get('content-type').includes('text/csv'));
+    const arrayBuffer = await res.arrayBuffer();
+    const buf = Buffer.from(arrayBuffer);
+    assert.strictEqual(buf[0], 0xef);
+    assert.strictEqual(buf[1], 0xbb);
+    assert.strictEqual(buf[2], 0xbf);
+    const csvText = buf.toString('utf8');
+    assert.ok(csvText.includes('กลุ่มสายงาน,ตำแหน่งวิชาการ,จำนวนผู้ใช้งาน'));
   });
 
   it('GET /api/dms/charts should return registrationTrend series', async () => {
@@ -243,6 +270,27 @@ describe('DMS Server & REST API Routes', () => {
     assert.strictEqual(data.registrationTrend.granularity, 'daily');
     assert.strictEqual(data.registrationTrend.labels.length, 31);
     assert.strictEqual(data.registrationTrend.total, 873);
+  });
+
+  it('GET /dms-dashboard-overview.mp4 should serve MP4 video with Accept-Ranges', async () => {
+    const res = await fetch(`${baseUrl}/dms-dashboard-overview.mp4`);
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.headers.get('content-type'), 'video/mp4');
+    assert.strictEqual(res.headers.get('accept-ranges'), 'bytes');
+    const len = parseInt(res.headers.get('content-length'), 10);
+    assert.ok(len > 1000000, `Video should be > 1MB, got ${len}`);
+  });
+
+  it('GET /dms-dashboard-overview.mp4 with Range header should return 206 Partial Content', async () => {
+    const res = await fetch(`${baseUrl}/dms-dashboard-overview.mp4`, {
+      headers: { Range: 'bytes=0-1023' },
+    });
+    assert.strictEqual(res.status, 206);
+    assert.strictEqual(res.headers.get('content-type'), 'video/mp4');
+    assert.strictEqual(res.headers.get('content-length'), '1024');
+    assert.ok(res.headers.get('content-range').startsWith('bytes 0-1023/'));
+    const chunk = await res.arrayBuffer();
+    assert.strictEqual(chunk.byteLength, 1024);
   });
 
   it('GET /api/dms/unknown should return 404', async () => {

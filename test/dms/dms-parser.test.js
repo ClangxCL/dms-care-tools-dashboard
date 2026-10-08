@@ -4,10 +4,10 @@ import { parseDmsExcel } from '../../src/dms/dms-parser.js';
 import { DmsRecord, normalizeRawRow } from '../../src/dms/dms-record.js';
 
 describe('DMS Excel Parser & Normalizer', () => {
-  it('should parse DMS_Care_Tools_Cleaned_Ready.xlsx and return all 4,203 rows', () => {
+  it('should parse User_DMS_Cleaned_Ready.xlsx and return all 4,205 rows', () => {
     const records = parseDmsExcel();
     assert.ok(Array.isArray(records));
-    assert.strictEqual(records.length, 4203);
+    assert.strictEqual(records.length, 4205);
 
     const first = records[0];
     assert.ok(first instanceof DmsRecord);
@@ -18,7 +18,7 @@ describe('DMS Excel Parser & Normalizer', () => {
     assert.strictEqual(first.healthRegion, 'เขต 10');
     assert.strictEqual(first.province, 'ศรีสะเกษ');
     assert.strictEqual(first.hospitalLevel, 'รพช.');
-    assert.strictEqual(first.status, 'ปกติ / Active');
+    assert.strictEqual(first.status, 'ปกติ');
     assert.strictEqual(first.isActive, true);
   });
 
@@ -47,11 +47,12 @@ describe('DMS Excel Parser & Normalizer', () => {
     assert.strictEqual(record.status, 'ปกติ / Active');
     assert.strictEqual(record.isActive, true);
     assert.strictEqual(record.blockReason, null);
-    assert.strictEqual(record.year, 2024);
+    assert.strictEqual(record.yearBE, 2567);
+    assert.strictEqual(record.yearCE, 2024);
     assert.strictEqual(record.month, 1);
     assert.strictEqual(record.day, 10);
-    assert.strictEqual(record.yearMonth, '2024-01');
-    assert.strictEqual(record.dateKey, '2024-01-10');
+    assert.strictEqual(record.yearMonth, '2567-01');
+    assert.ok(record.dateKey.includes('-01-10'));
   });
 
   it('should recognize blocked and retired accounts as inactive', () => {

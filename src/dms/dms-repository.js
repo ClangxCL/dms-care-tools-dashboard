@@ -60,6 +60,10 @@ export class DmsRepository {
       hospitalLevel,
       cleanedPosition,
       position,
+      facility,
+      hospitalName,
+      hospitalCode,
+      affiliation,
       status,
       isActive,
       year,
@@ -71,12 +75,31 @@ export class DmsRepository {
 
     const searchTerm = (q || query || '').trim().toLowerCase();
     const targetPosition = (cleanedPosition || position || '').trim();
-    const targetYear = (year !== undefined && year !== null && String(year).trim() !== '')
-      ? parseInt(year, 10)
-      : null;
-    const targetMonth = (month !== undefined && month !== null && String(month).trim() !== '')
-      ? parseInt(month, 10)
-      : null;
+    const targetAffiliation = (affiliation || '').trim();
+    const targetFacility = (facility || hospitalName || hospitalCode || '').trim();
+    
+    let isYearUnspecified = false;
+    let targetYear = null;
+    if (year !== undefined && year !== null && String(year).trim() !== '') {
+      const yStr = String(year).trim();
+      if (yStr === '-' || yStr.toLowerCase() === 'unspecified' || yStr === 'ไม่ระบุ') {
+        isYearUnspecified = true;
+      } else {
+        targetYear = parseInt(yStr, 10);
+      }
+    }
+
+    let isMonthUnspecified = false;
+    let targetMonth = null;
+    if (month !== undefined && month !== null && String(month).trim() !== '') {
+      const mStr = String(month).trim();
+      if (mStr === '-' || mStr.toLowerCase() === 'unspecified' || mStr === 'ไม่ระบุ') {
+        isMonthUnspecified = true;
+      } else {
+        targetMonth = parseInt(mStr, 10);
+      }
+    }
+
     const targetYearMonth = (yearMonth || '').trim();
 
     return this.records.filter((rec) => {
@@ -98,18 +121,39 @@ export class DmsRepository {
       if (targetPosition && rec.cleanedPosition !== targetPosition) {
         return false;
       }
+      if (targetAffiliation && rec.affiliation !== targetAffiliation) {
+        return false;
+      }
+      if (targetFacility) {
+        const matchesFac =
+          rec.hospitalName === targetFacility ||
+          rec.hospitalCode === targetFacility ||
+          `${rec.hospitalName} (${rec.hospitalCode})` === targetFacility;
+        if (!matchesFac) return false;
+      }
       if (status && rec.status !== status.trim()) {
         return false;
       }
       if (typeof isActive === 'boolean' && rec.isActive !== isActive) {
         return false;
       }
-      if (targetYear !== null && !isNaN(targetYear) && rec.year !== targetYear) {
-        return false;
+
+      if (isYearUnspecified) {
+        if (rec.year !== null && rec.yearBE !== null) return false;
+      } else if (targetYear !== null && !isNaN(targetYear)) {
+        const matchesYear =
+          rec.year === targetYear ||
+          rec.yearBE === targetYear ||
+          rec.yearCE === targetYear;
+        if (!matchesYear) return false;
       }
-      if (targetMonth !== null && !isNaN(targetMonth) && rec.month !== targetMonth) {
-        return false;
+
+      if (isMonthUnspecified) {
+        if (rec.month !== null) return false;
+      } else if (targetMonth !== null && !isNaN(targetMonth)) {
+        if (rec.month !== targetMonth) return false;
       }
+
       if (targetYearMonth && rec.yearMonth !== targetYearMonth) {
         return false;
       }
@@ -124,7 +168,8 @@ export class DmsRepository {
           rec.province.toLowerCase().includes(searchTerm) ||
           rec.district.toLowerCase().includes(searchTerm) ||
           rec.subdistrict.toLowerCase().includes(searchTerm) ||
-          rec.healthRegion.toLowerCase().includes(searchTerm);
+          rec.healthRegion.toLowerCase().includes(searchTerm) ||
+          rec.affiliation.toLowerCase().includes(searchTerm);
 
         if (!matchesQuery) return false;
       }
@@ -146,6 +191,8 @@ export class DmsRepository {
     const subdistrictsSet = new Set();
     const hospitalLevelsSet = new Set();
     const positionsSet = new Set();
+    const affiliationsSet = new Set();
+    const facilitiesMap = new Map();
     const statusesSet = new Set();
     const yearsSet = new Set();
     const monthsSet = new Set();
@@ -153,35 +200,48 @@ export class DmsRepository {
     const targetRegion = (context.healthRegion || '').trim();
     const targetProvince = (context.province || '').trim();
     const targetDistrict = (context.district || '').trim();
+    const targetSubdistrict = (context.subdistrict || '').trim();
+    const targetAffiliation = (context.affiliation || '').trim();
     const targetYear = (context.year !== undefined && context.year !== null && String(context.year).trim() !== '')
       ? parseInt(context.year, 10)
       : null;
 
     for (const rec of this.records) {
       if (rec.healthRegion) healthRegionsSet.add(rec.healthRegion);
-      
-      // Provinces can be scoped to healthRegion if specified
-      if (targetRegion) {
-        if (rec.healthRegion === targetRegion && rec.province) provincesSet.add(rec.province);
-      } else {
-        if (rec.province) provincesSet.add(rec.province);
+      if (rec.affiliation) affiliationsSet.add(rec.affiliation);
+
+      // Hierarchical match checks:
+      const matchRegion = !targetRegion || rec.healthRegion === targetRegion;
+      const matchProvince = !targetProvince || rec.province === targetProvince;
+      const matchDistrict = !targetDistrict || rec.district === targetDistrict;
+      const matchSubdistrict = !targetSubdistrict || rec.subdistrict === targetSubdistrict;
+
+      // Provinces scoped to region (and district/subdistrict if provided)
+      if (matchRegion && matchDistrict && matchSubdistrict && rec.province) {
+        provincesSet.add(rec.province);
       }
 
-      // Districts scoped to province
-      if (targetProvince) {
-        if (rec.province === targetProvince && rec.district) districtsSet.add(rec.district);
-      } else {
-        if (rec.district) districtsSet.add(rec.district);
+      // Districts scoped to region and province (and subdistrict if provided)
+      if (matchRegion && matchProvince && matchSubdistrict && rec.district) {
+        districtsSet.add(rec.district);
       }
 
-      // Subdistricts scoped to district (and province)
-      if (targetDistrict) {
-        const matchesProv = !targetProvince || rec.province === targetProvince;
-        if (matchesProv && rec.district === targetDistrict && rec.subdistrict) {
-          subdistrictsSet.add(rec.subdistrict);
+      // Subdistricts scoped to region, province, and district
+      if (matchRegion && matchProvince && matchDistrict && rec.subdistrict) {
+        subdistrictsSet.add(rec.subdistrict);
+      }
+
+      // Facilities scoped to active geo hierarchy and affiliation
+      const matchesAffil = !targetAffiliation || rec.affiliation === targetAffiliation;
+      if (matchRegion && matchProvince && matchDistrict && matchSubdistrict && matchesAffil && rec.hospitalName) {
+        const key = rec.hospitalCode ? `${rec.hospitalName} (${rec.hospitalCode})` : rec.hospitalName;
+        if (!facilitiesMap.has(key)) {
+          facilitiesMap.set(key, {
+            name: rec.hospitalName,
+            code: rec.hospitalCode,
+            displayName: key,
+          });
         }
-      } else {
-        if (rec.subdistrict) subdistrictsSet.add(rec.subdistrict);
       }
 
       if (rec.hospitalLevel) hospitalLevelsSet.add(rec.hospitalLevel);
@@ -189,9 +249,13 @@ export class DmsRepository {
       if (rec.status) statusesSet.add(rec.status);
 
       // Temporal years & months
-      if (rec.year) yearsSet.add(rec.year);
+      if (rec.yearBE) yearsSet.add(rec.yearBE);
+      else if (rec.year) yearsSet.add(rec.year);
+
       if (targetYear !== null && !isNaN(targetYear)) {
-        if (rec.year === targetYear && rec.month) monthsSet.add(rec.month);
+        if ((rec.yearBE === targetYear || rec.year === targetYear || rec.yearCE === targetYear) && rec.month) {
+          monthsSet.add(rec.month);
+        }
       } else {
         if (rec.month) monthsSet.add(rec.month);
       }
@@ -203,6 +267,8 @@ export class DmsRepository {
     const subdistricts = Array.from(subdistrictsSet).sort((a, b) => a.localeCompare(b, 'th'));
     const hospitalLevels = Array.from(hospitalLevelsSet).sort((a, b) => a.localeCompare(b, 'th'));
     const positions = Array.from(positionsSet).sort((a, b) => a.localeCompare(b, 'th'));
+    const affiliations = Array.from(affiliationsSet).sort((a, b) => a.localeCompare(b, 'th'));
+    const facilities = Array.from(facilitiesMap.values()).sort((a, b) => a.displayName.localeCompare(b.displayName, 'th'));
     const statuses = Array.from(statusesSet).sort((a, b) => a.localeCompare(b, 'th'));
     const years = Array.from(yearsSet).sort((a, b) => a - b);
     const months = Array.from(monthsSet).sort((a, b) => a - b);
@@ -214,10 +280,49 @@ export class DmsRepository {
       subdistricts,
       hospitalLevels,
       positions,
+      affiliations,
+      facilities,
       statuses,
       years,
       months,
     };
+  }
+
+  /**
+   * Helper to return provinces for a given health region.
+   * @param {string} healthRegion
+   * @returns {Array<string>}
+   */
+  getFilteredProvinces(healthRegion) {
+    return this.getDistinctFilterValues({ healthRegion }).provinces;
+  }
+
+  /**
+   * Helper to return districts for a given province.
+   * @param {string} province
+   * @returns {Array<string>}
+   */
+  getFilteredDistricts(province) {
+    return this.getDistinctFilterValues({ province }).districts;
+  }
+
+  /**
+   * Helper to return subdistricts for a given district.
+   * @param {string} province
+   * @param {string} district
+   * @returns {Array<string>}
+   */
+  getFilteredSubdistricts(province, district) {
+    return this.getDistinctFilterValues({ province, district }).subdistricts;
+  }
+
+  /**
+   * Helper to return facilities matching filters.
+   * @param {Object} context
+   * @returns {Array<Object>}
+   */
+  getFilteredFacilities(context = {}) {
+    return this.getDistinctFilterValues(context).facilities;
   }
 
   /**
@@ -273,6 +378,7 @@ export class DmsRepository {
     const regionCounts = {};
     const levelCounts = {};
     const positionCounts = {};
+    const affiliationCounts = {};
     const statusCounts = {};
 
     for (const rec of filtered) {
@@ -287,6 +393,10 @@ export class DmsRepository {
       // Position counts
       const pos = rec.cleanedPosition || 'ไม่ระบุ';
       positionCounts[pos] = (positionCounts[pos] || 0) + 1;
+
+      // Affiliation counts
+      const aff = rec.affiliation || 'ไม่ระบุ';
+      affiliationCounts[aff] = (affiliationCounts[aff] || 0) + 1;
 
       // Status counts
       const st = rec.status || 'ไม่ระบุ';
@@ -318,6 +428,15 @@ export class DmsRepository {
       data: sortedPositions.map(([, v]) => v),
     };
 
+    // Affiliations sorted descending
+    const sortedAffiliations = Object.entries(affiliationCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10);
+    const affiliationsChart = {
+      labels: sortedAffiliations.map(([k]) => k),
+      data: sortedAffiliations.map(([, v]) => v),
+    };
+
     // Statuses sorted descending
     const sortedStatuses = Object.entries(statusCounts).sort((a, b) => b[1] - a[1]);
     const statusChart = {
@@ -331,6 +450,7 @@ export class DmsRepository {
       regions: regionsChart,
       hospitalLevels: hospitalLevelsChart,
       positions: positionsChart,
+      affiliations: affiliationsChart,
       status: statusChart,
       registrationTrend,
     };
@@ -1061,6 +1181,182 @@ export class DmsRepository {
         escapeCsv(`${p.activeUsers} (${p.activePercentage}%)`),
         escapeCsv(`${p.blockedUsers} (${p.blockedPercentage}%)`),
         escapeCsv(levelsStr),
+      ].join(','));
+    }
+
+    return '\uFEFF' + rows.join('\r\n');
+  }
+
+  /**
+   * Aggregates records at the Position level.
+   * @param {Object} options
+   * @param {Object} [options.filters={}]
+   * @param {number} [options.page=1]
+   * @param {number} [options.limit=25]
+   * @param {string} [options.sort='totalUsers']
+   * @param {string} [options.order='desc']
+   * @returns {Object}
+   */
+  getPositionAggregations({
+    filters = {},
+    page = 1,
+    limit = 25,
+    sort = 'totalUsers',
+    order = 'desc',
+  } = {}) {
+    const POSITION_GROUP_MAP = {
+      'พยาบาลวิชาชีพ': 'สายงานพยาบาล',
+      'นักวิชาการสาธารณสุข': 'สายงานสาธารณสุข',
+      'นักวิชาการคอมพิวเตอร์': 'สายงานเทคโนโลยีสารสนเทศ',
+      'เจ้าพนักงานสาธารณสุข': 'สายงานสาธารณสุข',
+      'แพทย์แผนไทย': 'สายงานการแพทย์แผนไทย',
+      'นายแพทย์': 'สายงานการแพทย์',
+      'นักกายภาพบำบัด': 'สายงานฟื้นฟูและวิทยาศาสตร์การแพทย์',
+      'เจ้าพนักงานทันตสาธารณสุข': 'สายงานทันตกรรม',
+      'เจ้าพนักงานธุรการ': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'ผู้ช่วยนักวิชาการสาธารณสุข': 'สายงานสาธารณสุข',
+      'ทันตแพทย์': 'สายงานทันตกรรม',
+      'พนักงานธุรการ': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'พนักงานบริการ': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'เจ้าพนักงานเครื่องคอมพิวเตอร์': 'สายงานเทคโนโลยีสารสนเทศ',
+      'พนักงานช่วยเหลือคนไข้': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'ผู้อำนวยการโรงพยาบาลส่งเสริมสุขภาพตำบล': 'สายงานสาธารณสุข',
+      'นักวิชาการทันตสาธารณสุข': 'สายงานทันตกรรม',
+      'พนักงานพิมพ์': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'นักกิจกรรมบำบัด': 'สายงานฟื้นฟูและวิทยาศาสตร์การแพทย์',
+      'นักจิตวิทยา': 'สายงานฟื้นฟูและวิทยาศาสตร์การแพทย์',
+      'นักโภชนาการ': 'สายงานฟื้นฟูและวิทยาศาสตร์การแพทย์',
+      'เจ้าหน้าที่บันทึกข้อมูล': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'เจ้าพนักงานเวชสถิติ': 'สายงานฟื้นฟูและวิทยาศาสตร์การแพทย์',
+      'เจ้าพนักงานเภสัชกรรม': 'สายงานฟื้นฟูและวิทยาศาสตร์การแพทย์',
+      'แพทย์': 'สายงานการแพทย์',
+      'พยาบาลเทคนิค': 'สายงานพยาบาล',
+      'เจ้าพนักงานการเงินและบัญชี': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'ผู้ช่วยแพทย์แผนไทย': 'สายงานการแพทย์แผนไทย',
+      'เจ้าหน้าที่ธุรการ': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'เภสัชกร': 'สายงานฟื้นฟูและวิทยาศาสตร์การแพทย์',
+      'ผู้ช่วยเจ้าพนักงานธุรการ': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'เจ้าหน้าที่การเงินและบัญชี': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'นักวิเคราะห์นโยบายและแผน': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'ผู้ช่วยทันตแพทย์': 'สายงานทันตกรรม',
+      'นักจัดการงานทั่วไป': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'นักพัฒนาชุมชน': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'นายช่างเทคนิค': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'นิติกร': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'ผู้ช่วยนักวิจัย': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'พนักงานการเงินและบัญชี': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'ผู้ช่วยพนักงานสุขศึกษา': 'สายงานสาธารณสุข',
+      'เจ้าพนักงานโสตทัศนศึกษา': 'สายงานสนับสนุนทั่วไปและบริหาร',
+      'หัวหน้าหน่วยสร้างเสริมสุขภาพ': 'สายงานสาธารณสุข',
+      'หัวหน้ากลุ่มงานส่งเสริมสุขภาพ': 'สายงานสาธารณสุข',
+      'ผู้ช่วยนักวิชาการคอมพิวเตอร์': 'สายงานเทคโนโลยีสารสนเทศ',
+      'เจ้าหน้าที่คอมพิวเตอร์': 'สายงานเทคโนโลยีสารสนเทศ',
+    };
+
+    const filtered = this.filter(filters);
+    const positionMap = new Map();
+    const grandTotal = filtered.length;
+
+    for (const rec of filtered) {
+      const pos = rec.cleanedPosition || 'ไม่ระบุ';
+      if (!positionMap.has(pos)) {
+        positionMap.set(pos, {
+          group: POSITION_GROUP_MAP[pos] || 'สายงานสนับสนุนทั่วไปและบริหาร',
+          cleanedPosition: pos,
+          totalUsers: 0,
+          activeUsers: 0,
+          blockedUsers: 0,
+        });
+      }
+
+      const item = positionMap.get(pos);
+      item.totalUsers++;
+      if (rec.isActive) {
+        item.activeUsers++;
+      } else {
+        item.blockedUsers++;
+      }
+    }
+
+    const list = Array.from(positionMap.values()).map((p) => {
+      const percentage = grandTotal > 0 ? Number(((p.totalUsers / grandTotal) * 100).toFixed(2)) : 0;
+      const activePercentage = p.totalUsers > 0 ? Number(((p.activeUsers / p.totalUsers) * 100).toFixed(1)) : 0;
+      const blockedPercentage = p.totalUsers > 0 ? Number(((p.blockedUsers / p.totalUsers) * 100).toFixed(1)) : 0;
+
+      return {
+        group: p.group,
+        cleanedPosition: p.cleanedPosition,
+        totalUsers: p.totalUsers,
+        activeUsers: p.activeUsers,
+        activePercentage,
+        blockedUsers: p.blockedUsers,
+        blockedPercentage,
+        percentage,
+      };
+    });
+
+    const isAsc = String(order).toLowerCase() === 'asc';
+    list.sort((a, b) => {
+      const valA = a[sort] ?? '';
+      const valB = b[sort] ?? '';
+
+      if (typeof valA === 'number' && typeof valB === 'number') {
+        return isAsc ? valA - valB : valB - valA;
+      }
+      return isAsc
+        ? String(valA).localeCompare(String(valB), 'th')
+        : String(valB).localeCompare(String(valA), 'th');
+    });
+
+    const total = list.length;
+    const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+    const parsedLimit = Math.max(1, Math.min(200, parseInt(limit, 10) || 25));
+    const totalPages = Math.ceil(total / parsedLimit) || 1;
+    const offset = (parsedPage - 1) * parsedLimit;
+    const data = list.slice(offset, offset + parsedLimit);
+
+    return {
+      data,
+      pagination: {
+        page: parsedPage,
+        limit: parsedLimit,
+        total,
+        totalPages,
+      },
+    };
+  }
+
+  /**
+   * Exports Position summary table to CSV with UTF-8 BOM.
+   * @param {Object} [filters={}]
+   * @returns {string}
+   */
+  toPositionCsv(filters = {}) {
+    const res = this.getPositionAggregations({ filters, limit: 1000, sort: 'totalUsers', order: 'desc' });
+    const headers = [
+      'กลุ่มสายงาน',
+      'ตำแหน่งวิชาการ',
+      'จำนวนผู้ใช้งาน',
+      'ปกติ',
+      'บล็อก',
+      'สัดส่วน (%)',
+    ];
+
+    const escapeCsv = (val) => {
+      if (val === null || val === undefined) return '';
+      const str = String(val).replace(/"/g, '""');
+      return str.includes(',') || str.includes('"') || str.includes('\n') ? `"${str}"` : str;
+    };
+
+    const rows = [headers.join(',')];
+    for (const p of res.data) {
+      rows.push([
+        escapeCsv(p.group),
+        escapeCsv(p.cleanedPosition),
+        escapeCsv(p.totalUsers),
+        escapeCsv(p.activeUsers),
+        escapeCsv(p.blockedUsers),
+        escapeCsv(p.percentage),
       ].join(','));
     }
 

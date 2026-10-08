@@ -7,9 +7,14 @@
   "scripts": {
     "test": "node --test test/**/*.test.js",
     "dashboard": "node src/dms/dms-server.js",
-    "start": "node src/dms/dms-server.js"
+    "start": "node src/dms/dms-server.js",
+    "build:pages": "node scripts/build-pages.js",
+    "deploy:gh-pages": "node scripts/deploy-gh-pages.js"
   },
   "dependencies": {
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@fission-ai/openspec": "^1.14.0"
   }
 }

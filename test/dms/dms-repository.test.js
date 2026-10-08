@@ -10,18 +10,18 @@ describe('DmsRepository Engine', () => {
     repo = new DmsRepository().loadFromFile();
   });
 
-  it('should load all 4,203 records into memory', () => {
-    assert.strictEqual(repo.getAll().length, 4203);
+  it('should load all 4,205 records into memory', () => {
+    assert.strictEqual(repo.getAll().length, 4205);
   });
 
   describe('KPI Summary', () => {
     it('should compute accurate global KPI summary', () => {
       const summary = repo.getSummary();
-      assert.strictEqual(summary.totalUsers, 4203);
-      assert.strictEqual(summary.activeUsers, 4096);
-      assert.strictEqual(summary.blockedUsers, 107);
-      assert.strictEqual(summary.activePercentage, 97.5);
-      assert.strictEqual(summary.blockedPercentage, 2.5);
+      assert.strictEqual(summary.totalUsers, 4205);
+      assert.strictEqual(summary.activeUsers, 4085);
+      assert.strictEqual(summary.blockedUsers, 120);
+      assert.strictEqual(summary.activePercentage, 97.1);
+      assert.strictEqual(summary.blockedPercentage, 2.9);
       assert.strictEqual(summary.uniqueFacilities, 2911);
       assert.strictEqual(summary.uniqueHealthRegions, 13);
       assert.strictEqual(summary.uniqueProvinces, 77);
@@ -57,7 +57,7 @@ describe('DmsRepository Engine', () => {
 
     it('should filter by status and isActive', () => {
       const blocked = repo.filter({ isActive: false });
-      assert.strictEqual(blocked.length, 107);
+      assert.strictEqual(blocked.length, 120);
       assert.ok(blocked.every((r) => !r.isActive));
     });
 
@@ -98,7 +98,7 @@ describe('DmsRepository Engine', () => {
       assert.strictEqual(page1.data.length, 10);
       assert.strictEqual(page1.pagination.page, 1);
       assert.strictEqual(page1.pagination.limit, 10);
-      assert.strictEqual(page1.pagination.total, 4203);
+      assert.strictEqual(page1.pagination.total, 4205);
       assert.strictEqual(page1.pagination.totalPages, 421);
 
       const page2 = repo.getPaginatedRecords({ page: 2, limit: 10 });
@@ -261,7 +261,7 @@ describe('DmsRepository Engine', () => {
     it('should return available years and months from getDistinctFilterValues', () => {
       const distinct = repo.getDistinctFilterValues();
       assert.ok(Array.isArray(distinct.years));
-      assert.deepStrictEqual(distinct.years, [2024, 2025, 2026]);
+      assert.deepStrictEqual(distinct.years, [2567, 2568, 2569]);
       assert.ok(Array.isArray(distinct.months));
       assert.strictEqual(distinct.months.length, 12);
     });
@@ -277,13 +277,13 @@ describe('DmsRepository Engine', () => {
     it('should filter records by year alone', () => {
       const filtered2024 = repo.filter({ year: 2024 });
       assert.ok(filtered2024.length > 0);
-      assert.ok(filtered2024.every((r) => r.year === 2024));
+      assert.ok(filtered2024.every((r) => r.yearCE === 2024 || r.yearBE === 2567));
     });
 
     it('should filter records by year and month together', () => {
       const filteredJan2024 = repo.filter({ year: 2024, month: 1 });
       assert.strictEqual(filteredJan2024.length, 873);
-      assert.ok(filteredJan2024.every((r) => r.year === 2024 && r.month === 1));
+      assert.ok(filteredJan2024.every((r) => (r.yearCE === 2024 || r.yearBE === 2567) && r.month === 1));
     });
   });
 
@@ -298,8 +298,8 @@ describe('DmsRepository Engine', () => {
       assert.ok(trend.cumulativeUsers.length === trend.labels.length);
       // Final cumulative sum matches records with valid dates
       assert.strictEqual(trend.cumulativeUsers[trend.cumulativeUsers.length - 1], trend.totalWithDates);
-      assert.strictEqual(trend.total, 4203);
-      assert.strictEqual(trend.totalWithDates, 4202);
+      assert.strictEqual(trend.total, 4205);
+      assert.strictEqual(trend.totalWithDates, 4204);
     });
 
     it('should produce 12-month series when filtered by year', () => {

@@ -153,9 +153,9 @@
           </div>
         </div>
 
-        <!-- Year Filter (ปี) -->
+        <!-- Year Filter (ปี พ.ศ.) -->
         <div class="filter-field">
-          <label for="yearFilter">ปีที่ลงทะเบียน</label>
+          <label for="yearFilter">ปี พ.ศ. ที่ลงทะเบียน</label>
           <select id="yearFilter">
             <option value="">ทุกปี (ทั้งหมด)</option>
           </select>
@@ -188,16 +188,24 @@
         <!-- District Filter (อำเภอ) -->
         <div class="filter-field">
           <label for="districtFilter">อำเภอ</label>
-          <select id="districtFilter" disabled>
-            <option value="">ทั้งหมด (เลือกจังหวัดก่อน)</option>
+          <select id="districtFilter">
+            <option value="">ทั้งหมด (ทุกอำเภอ)</option>
           </select>
         </div>
 
         <!-- Subdistrict Filter (ตำบล) -->
         <div class="filter-field">
           <label for="subdistrictFilter">ตำบล</label>
-          <select id="subdistrictFilter" disabled>
-            <option value="">ทั้งหมด (เลือกอำเภอก่อน)</option>
+          <select id="subdistrictFilter">
+            <option value="">ทั้งหมด (ทุกตำบล)</option>
+          </select>
+        </div>
+
+        <!-- Affiliation Filter (สังกัด) -->
+        <div class="filter-field">
+          <label for="affiliationFilter">สังกัด</label>
+          <select id="affiliationFilter">
+            <option value="">ทั้งหมด (ทุกสังกัด)</option>
           </select>
         </div>
 
@@ -207,6 +215,15 @@
           <select id="levelFilter">
             <option value="">ทั้งหมด (ทุกระดับ)</option>
           </select>
+        </div>
+
+        <!-- Facility Filter (หน่วยบริการ) -->
+        <div class="filter-field facility-filter-field">
+          <label for="facilityFilter">หน่วยบริการ / สถานพยาบาล</label>
+          <div class="search-input-wrapper">
+            <input type="text" id="facilityFilter" list="facilityDatalist" placeholder="พิมพ์ชื่อหรือรหัส รพ. เพื่อเลือก...">
+            <datalist id="facilityDatalist"></datalist>
+          </div>
         </div>
 
         <!-- Position Filter -->
@@ -396,6 +413,68 @@
           <canvas id="levelsChart"></canvas>
         </div>
       </div>
+
+      <!-- Row: Affiliation Breakdown & Video Showcase (เคียงข้างกัน) -->
+      <div class="affiliation-video-row chart-full-width">
+        <!-- Chart 5: Affiliation Breakdown Doughnut Chart -->
+        <div class="chart-card affiliation-card">
+          <div class="chart-header">
+            <div class="chart-title-group">
+              <h3>สัดส่วนตามสังกัด</h3>
+              <span class="chart-subtitle">สป, อปท, กรมการแพทย์, อบจ. ฯลฯ</span>
+            </div>
+          </div>
+          <div class="chart-canvas-container donut-container">
+            <canvas id="affiliationsChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Dashboard Overview Video Showcase (วางเคียงข้างสัดส่วนตามสังกัด) -->
+        <div class="chart-card video-card">
+          <div class="chart-header">
+            <div class="chart-title-group">
+              <div class="badge-tag video-badge">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                <span>DMS Video Overview</span>
+              </div>
+              <h3>วิดีโอแนะนำ & ภาพรวมระบบแดชบอร์ด</h3>
+              <span class="chart-subtitle">สรุปข้อมูล 4,205 บุคลากร สัดส่วนสังกัด และระบบตัวกรอง 9 ระดับ</span>
+            </div>
+            <div class="video-badges-right">
+              <span class="badge-pill-live">
+                <span class="pulse-indicator-dot"></span>
+                <span>HD 720p &bull; 16s</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="video-container">
+            <video id="dashboardVideo" class="dashboard-video" controls autoplay muted loop playsinline preload="auto">
+              <source src="dms-dashboard-overview.mp4" type="video/mp4">
+              เบราว์เซอร์ของคุณไม่รองรับการเล่นแท็กวิดีโอ HTML5
+            </video>
+          </div>
+
+          <!-- Video Chapter Shortcuts -->
+          <div class="video-timeline-chapters">
+            <span class="chapter-label">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+              </svg>
+              <span>ช่วงเวลาสำคัญ:</span>
+            </span>
+            <div class="chapter-buttons">
+              <button type="button" class="video-chapter-btn active" data-time="0">00:00 ภาพรวม</button>
+              <button type="button" class="video-chapter-btn" data-time="4">00:04 สัดส่วนสังกัด</button>
+              <button type="button" class="video-chapter-btn" data-time="8">00:08 ตัวกรอง 9 ระดับ</button>
+              <button type="button" class="video-chapter-btn" data-time="12">00:12 ตาราง & ส่งออก</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Tables Section (Tabs: Individual Records vs Facility Aggregation) -->
@@ -434,6 +513,16 @@
             </svg>
             <span>ตารางสรุปรายหน่วยงาน</span>
             <span class="tab-counter-pill" id="facilityCountPill">-</span>
+          </button>
+          <button id="tabPositionsBtn" class="tab-btn" data-tab="positions">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="8.5" cy="7" r="4"/>
+              <line x1="20" y1="8" x2="20" y2="14"/>
+              <line x1="23" y1="11" x2="17" y2="11"/>
+            </svg>
+            <span>ตารางสรุปรายตำแหน่ง</span>
+            <span class="tab-counter-pill" id="positionCountPill">46 ตำแหน่ง</span>
           </button>
         </div>
 
@@ -539,6 +628,27 @@
         </table>
       </div>
 
+      <!-- Tab 5: Position Aggregation Table -->
+      <div id="positionsTableWrapper" class="table-wrapper hidden">
+        <table class="data-table" id="positionsTable">
+          <thead>
+            <tr>
+              <th data-sort="group">กลุ่มสายงาน <span class="sort-icon">↕</span></th>
+              <th data-sort="cleanedPosition">ตำแหน่งวิชาการ <span class="sort-icon">↕</span></th>
+              <th data-sort="totalUsers">จำนวนผู้ใช้งาน <span class="sort-icon">↕</span></th>
+              <th data-sort="activeUsers">ปกติ (Active) <span class="sort-icon">↕</span></th>
+              <th data-sort="blockedUsers">บล็อก <span class="sort-icon">↕</span></th>
+              <th data-sort="percentage">สัดส่วน (%) <span class="sort-icon">↕</span></th>
+            </tr>
+          </thead>
+          <tbody id="positionsTableBody">
+            <tr>
+              <td colspan="6" class="table-loading">กำลังโหลดข้อมูลสรุปตามตำแหน่ง...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       <!-- Shared Pagination -->
       <div class="pagination-footer">
         <div class="pagination-info" id="paginationInfo">
@@ -558,6 +668,7 @@
     </footer>
   </div>
 
+  <script src="dms-client-engine.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
